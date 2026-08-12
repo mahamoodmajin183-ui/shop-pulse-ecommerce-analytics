@@ -122,13 +122,14 @@ class DataCleaner:
             logger.warning(f"Dropped {invalid_dates} rows with unparseable dates.")
             
         # Enrich with analytical date attributes
-        df["order_date"] = df["order_date"].dt.round('s')
+        df["order_date"] = pd.to_datetime(df["order_date"], format='mixed', errors='coerce').dt.round('s')
         df["order_year"] = df["order_date"].dt.year
         df["order_month"] = df["order_date"].dt.month
         df["order_year_month"] = df["order_date"].dt.to_period("M").astype(str)
         df["order_quarter"] = df["order_date"].dt.to_period("Q").astype(str)
         df["order_day_name"] = df["order_date"].dt.day_name()
         df["order_hour"] = df["order_date"].dt.hour
+        df["order_date"] = df["order_date"].dt.strftime("%Y-%m-%d %H:%M:%S")
         
         logger.info("Date columns normalized and enriched with calendar features.")
         return df
