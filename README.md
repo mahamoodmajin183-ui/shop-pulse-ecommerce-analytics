@@ -224,7 +224,7 @@ ORDER BY year_month ASC;
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/<YOUR_USERNAME>/shop-pulse-ecommerce-analytics.git
+git clone https://github.com/mahamoodmajin183-ui/shop-pulse-ecommerce-analytics.git
 cd shop-pulse-ecommerce-analytics
 
 # 2. Create and activate a virtual environment
