@@ -1,0 +1,3 @@
+"""
+ShopPulse Test Suite Package
+"""

@@ -1,0 +1,3 @@
+"""
+ShopPulse Analytics Dashboard Package
+"""
