@@ -504,7 +504,10 @@ HTML_TEMPLATE = """
                     <option value="West">West</option>
                 </select>
             </div>
-            <div style="margin-top: 16px;">
+            <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px;">
+                <a href="/api/download_pdf" class="btn-primary" style="width: 100%; justify-content: center; text-decoration: none; background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);">
+                    <i class="fa-solid fa-file-pdf"></i> Download Project PDF
+                </a>
                 <a href="/api/download_csv" class="btn-primary" style="width: 100%; justify-content: center; text-decoration: none;">
                     <i class="fa-solid fa-download"></i> Export Clean CSV
                 </a>
@@ -1047,6 +1050,15 @@ def api_run_sql():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+@app.route("/api/download_pdf")
+def api_download_pdf():
+    from flask import send_file
+    pdf_path = os.path.join(BASE_DIR, "reports", "ShopPulse_Complete_Project_Report.pdf")
+    if not os.path.exists(pdf_path):
+        from src.generate_pdf_report import generate_pdf
+        generate_pdf(pdf_path)
+    return send_file(pdf_path, as_attachment=True, download_name="ShopPulse_Complete_Project_Report.pdf")
 
 @app.route("/api/download_csv")
 def api_download_csv():
