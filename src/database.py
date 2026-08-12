@@ -10,7 +10,6 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 DB_ENGINE_TYPE = os.getenv("DB_ENGINE", "sqlite").lower()
@@ -27,7 +26,6 @@ def get_db_connection_url() -> str:
     if DB_ENGINE_TYPE == "postgresql":
         return f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
     else:
-        # SQLite
         os.makedirs(os.path.dirname(SQLITE_DB_PATH), exist_ok=True)
         return f"sqlite:///{SQLITE_DB_PATH}"
 
@@ -36,7 +34,6 @@ def get_engine():
     try:
         url = get_db_connection_url()
         engine = create_engine(url, echo=False)
-        # Test connection
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return engine
@@ -47,11 +44,12 @@ def get_engine():
 
 def initialize_and_seed_db(csv_path: str = "data/processed/cleaned_ecommerce_data.csv") -> None:
     """
-    Populate database tables (normalized star schema and flat table)
+    Populate database tables (normalized star schema and fact table)
     from the cleaned e-commerce dataset.
     """
     if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"Cleaned dataset not found at: {csv_path}")
+        from src.data_cleaning import clean_data
+        clean_data()
 
     df = pd.read_csv(csv_path)
     engine = get_engine()
@@ -63,25 +61,26 @@ def initialize_and_seed_db(csv_path: str = "data/processed/cleaned_ecommerce_dat
 
     # 2. Populate Normalized Dim Customers
     dim_customers = df[[
-        "customer_id", "customer_name", "customer_segment", "region", "city"
+        "customer_id", "customer_name", "customer_segment", "country",
+        "city", "state", "postal_code", "region"
     ]].drop_duplicates(subset=["customer_id"]).reset_index(drop=True)
     dim_customers.to_sql("dim_customers", con=engine, if_exists="replace", index=False)
 
     # 3. Populate Normalized Dim Products
     dim_products = df[[
-        "product_id", "product_name", "category", "unit_price", "cost"
+        "product_id", "product_name", "category", "sub_category"
     ]].drop_duplicates(subset=["product_id"]).reset_index(drop=True)
     dim_products.to_sql("dim_products", con=engine, if_exists="replace", index=False)
 
     # 4. Populate Normalized Fact Orders
     fact_orders = df[[
-        "order_id", "order_date", "customer_id", "product_id", "quantity",
-        "unit_price", "discount", "sales", "cost", "profit",
-        "payment_method", "region", "city"
+        "row_id", "order_id", "order_date", "ship_date", "ship_mode",
+        "customer_id", "product_id", "sales", "quantity", "discount",
+        "profit", "cost", "profit_margin_pct", "city", "state", "region"
     ]].reset_index(drop=True)
     fact_orders.to_sql("fact_orders", con=engine, if_exists="replace", index=False)
 
-    print(f" Database successfully initialized and seeded:")
+    print(f" Database successfully initialized and seeded with real data:")
     print(f"  - `fact_ecommerce_sales`: {len(df):,} rows")
     print(f"  - `dim_customers`: {len(dim_customers):,} rows")
     print(f"  - `dim_products`: {len(dim_products):,} rows")
@@ -96,6 +95,6 @@ def run_query(sql_query: str) -> pd.DataFrame:
 
 if __name__ == "__main__":
     initialize_and_seed_db()
-    test_df = run_query("SELECT COUNT(*) AS total_records, SUM(sales) AS total_revenue FROM fact_ecommerce_sales")
-    print("\nTest Query Verification:")
+    test_df = run_query("SELECT COUNT(*) AS total_records, ROUND(SUM(sales), 2) AS total_revenue, ROUND(SUM(profit), 2) AS total_profit FROM fact_ecommerce_sales")
+    print("\nVerified Real Database Query Result:")
     print(test_df)

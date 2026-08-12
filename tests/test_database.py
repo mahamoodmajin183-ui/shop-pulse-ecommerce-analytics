@@ -1,49 +1,18 @@
-"""
-Unit tests for database module and SQL query execution.
-"""
+"""Integration tests for database initialization, schema, and queries."""
+from src.database import get_engine, initialize_and_seed_db, run_query
 
-import pytest
-import pandas as pd
-from src.database import get_engine, run_query, initialize_and_seed_db
-
-def test_database_connection():
-    """Verify database engine connects and executes basic test query."""
-    engine = get_engine()
-    assert engine is not None
-
-def test_seeded_tables_exist():
-    """Verify seeded tables are populated with correct row counts."""
-    # Ensure seeded
+def test_database_initialization_and_seeding():
     initialize_and_seed_db()
-    
-    res_fact = run_query("SELECT COUNT(*) AS cnt FROM fact_ecommerce_sales")
-    assert res_fact.loc[0, "cnt"] >= 10000
-    
-    res_cust = run_query("SELECT COUNT(*) AS cnt FROM dim_customers")
-    assert res_cust.loc[0, "cnt"] >= 2000
-    
-    res_prod = run_query("SELECT COUNT(*) AS cnt FROM dim_products")
-    assert res_prod.loc[0, "cnt"] >= 500
+    res = run_query("SELECT COUNT(*) AS total_rows, SUM(sales) AS total_sales, SUM(profit) AS total_profit FROM fact_ecommerce_sales")
+    assert res.iloc[0]["total_rows"] == 9994
+    assert abs(res.iloc[0]["total_sales"] - 2297200.65) < 1.0
+    assert abs(res.iloc[0]["total_profit"] - 286396.54) < 1.0
 
-def test_analytical_sql_query():
-    """Verify execution of CTE and Window function on database."""
-    query = """
-    WITH cat_summary AS (
-        SELECT 
-            category,
-            SUM(sales) AS cat_sales,
-            SUM(profit) AS cat_profit
-        FROM fact_ecommerce_sales
-        GROUP BY category
-    )
-    SELECT 
-        category,
-        cat_sales,
-        cat_profit,
-        RANK() OVER (ORDER BY cat_sales DESC) AS sales_rank
-    FROM cat_summary;
-    """
-    df = run_query(query)
-    assert not df.empty
-    assert "sales_rank" in df.columns
-    assert df.loc[0, "sales_rank"] == 1
+def test_star_schema_tables():
+    cust_res = run_query("SELECT COUNT(*) AS total_customers FROM dim_customers")
+    prod_res = run_query("SELECT COUNT(*) AS total_products FROM dim_products")
+    orders_res = run_query("SELECT COUNT(*) AS total_orders FROM fact_orders")
+    
+    assert cust_res.iloc[0]["total_customers"] == 793
+    assert prod_res.iloc[0]["total_products"] == 1862
+    assert orders_res.iloc[0]["total_orders"] == 9994

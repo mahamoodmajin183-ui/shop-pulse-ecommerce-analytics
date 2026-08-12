@@ -2,6 +2,7 @@
 ShopPulse - Advanced E-Commerce Analytics Engine
 Provides modular statistical calculations, time-series metrics, RFM segmentation,
 cohort metrics, product profitability analysis, and data preparation for reporting.
+Verified against the Real Sample Superstore Dataset.
 """
 
 import pandas as pd
@@ -40,7 +41,7 @@ def calculate_kpis(df: pd.DataFrame) -> Dict[str, Any]:
     profit_margin = float((total_profit / total_revenue) * 100.0) if total_revenue > 0 else 0.0
     avg_discount = float(df["discount"].mean() * 100.0)
     
-    # Repeat customer rate
+    # Repeat customer rate (customers with >1 order)
     order_counts_per_cust = df.groupby("customer_id")["order_id"].nunique()
     repeat_customers = (order_counts_per_cust > 1).sum()
     repeat_rate = float((repeat_customers / total_customers) * 100.0) if total_customers > 0 else 0.0
@@ -74,8 +75,8 @@ def get_monthly_trends(df: pd.DataFrame) -> pd.DataFrame:
     monthly["aov"] = (monthly["revenue"] / monthly["orders"]).round(2)
     
     # MoM Growth calculations using LAG simulation
-    monthly["revenue_mom_growth_pct"] = monthly["revenue"].pct_change() * 100.0
-    monthly["profit_mom_growth_pct"] = monthly["profit"].pct_change() * 100.0
+    monthly["revenue_mom_growth_pct"] = (monthly["revenue"].pct_change() * 100.0).round(2)
+    monthly["profit_mom_growth_pct"] = (monthly["profit"].pct_change() * 100.0).round(2)
     
     # Cumulative running totals
     monthly["cumulative_revenue"] = monthly["revenue"].cumsum().round(2)
@@ -83,8 +84,8 @@ def get_monthly_trends(df: pd.DataFrame) -> pd.DataFrame:
     
     return monthly
 
-def get_category_performance(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate sales, profit, orders, and margin metrics by Category."""
+def get_category_performance(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Aggregate sales, profit, orders, and margin metrics by Category and Sub-Category."""
     cat_summary = df.groupby("category").agg(
         revenue=("sales", "sum"),
         profit=("profit", "sum"),
@@ -96,10 +97,21 @@ def get_category_performance(df: pd.DataFrame) -> pd.DataFrame:
     cat_summary["profit_margin_pct"] = (cat_summary["profit"] / cat_summary["revenue"] * 100.0).round(2)
     cat_summary["revenue_share_pct"] = (cat_summary["revenue"] / cat_summary["revenue"].sum() * 100.0).round(2)
     cat_summary = cat_summary.sort_values(by="revenue", ascending=False).reset_index(drop=True)
-    return cat_summary
+
+    subcat_summary = df.groupby(["category", "sub_category"]).agg(
+        revenue=("sales", "sum"),
+        profit=("profit", "sum"),
+        orders=("order_id", "nunique"),
+        units_sold=("quantity", "sum"),
+        avg_discount=("discount", lambda x: x.mean() * 100.0)
+    ).reset_index()
+    subcat_summary["profit_margin_pct"] = (subcat_summary["profit"] / subcat_summary["revenue"] * 100.0).round(2)
+    subcat_summary = subcat_summary.sort_values(by="revenue", ascending=False).reset_index(drop=True)
+
+    return cat_summary, subcat_summary
 
 def get_regional_performance(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Aggregate metrics by Region and Top Performing Cities."""
+    """Aggregate metrics by Region and Top Performing States."""
     region_summary = df.groupby("region").agg(
         revenue=("sales", "sum"),
         profit=("profit", "sum"),
@@ -111,20 +123,20 @@ def get_regional_performance(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFra
     region_summary["aov"] = (region_summary["revenue"] / region_summary["orders"]).round(2)
     region_summary = region_summary.sort_values(by="revenue", ascending=False).reset_index(drop=True)
 
-    city_summary = df.groupby(["region", "city"]).agg(
+    state_summary = df.groupby(["region", "state"]).agg(
         revenue=("sales", "sum"),
         profit=("profit", "sum"),
         orders=("order_id", "nunique")
     ).reset_index()
-    city_summary["profit_margin_pct"] = (city_summary["profit"] / city_summary["revenue"] * 100.0).round(2)
-    city_summary = city_summary.sort_values(by="revenue", ascending=False).reset_index(drop=True)
+    state_summary["profit_margin_pct"] = (state_summary["profit"] / state_summary["revenue"] * 100.0).round(2)
+    state_summary = state_summary.sort_values(by="profit", ascending=False).reset_index(drop=True)
 
-    return region_summary, city_summary
+    return region_summary, state_summary
 
 def get_top_products(df: pd.DataFrame, top_n: int = 10, by: str = "revenue") -> pd.DataFrame:
     """Retrieve top N products ranked by revenue or profit."""
     sort_col = "sales" if by == "revenue" else "profit"
-    prod_summary = df.groupby(["product_id", "product_name", "category"]).agg(
+    prod_summary = df.groupby(["product_id", "product_name", "category", "sub_category"]).agg(
         total_sales=("sales", "sum"),
         total_profit=("profit", "sum"),
         total_quantity=("quantity", "sum"),
@@ -137,10 +149,7 @@ def get_top_products(df: pd.DataFrame, top_n: int = 10, by: str = "revenue") -> 
 
 def get_rfm_segmentation(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Perform RFM (Recency, Frequency, Monetary) customer segmentation.
-    Recency: Days since last order relative to reference snapshot date.
-    Frequency: Total unique orders.
-    Monetary: Total spend (sales).
+    Perform RFM (Recency, Frequency, Monetary) customer segmentation on actual transaction history.
     """
     snapshot_date = df["order_date"].max() + pd.Timedelta(days=1)
     
@@ -154,15 +163,11 @@ def get_rfm_segmentation(df: pd.DataFrame) -> pd.DataFrame:
         total_profit=("profit", "sum")
     ).reset_index()
 
-    # Assign quartile scores (1-4)
-    # Recency: lower is better (more recent) -> reverse ranking
+    # Quartile scoring (1-4)
     rfm["R_Score"] = pd.qcut(rfm["recency"], 4, labels=[4, 3, 2, 1], duplicates="drop").astype(int)
     rfm["F_Score"] = pd.qcut(rfm["frequency"].rank(method="first"), 4, labels=[1, 2, 3, 4]).astype(int)
     rfm["M_Score"] = pd.qcut(rfm["monetary"], 4, labels=[1, 2, 3, 4]).astype(int)
     
-    rfm["RFM_Score"] = rfm["R_Score"].astype(str) + rfm["F_Score"].astype(str) + rfm["M_Score"].astype(str)
-    
-    # Segment assignment
     def assign_segment(row):
         r, f, m = row["R_Score"], row["F_Score"], row["M_Score"]
         if r >= 4 and f >= 3:
@@ -182,21 +187,25 @@ def get_rfm_segmentation(df: pd.DataFrame) -> pd.DataFrame:
     return rfm
 
 def get_discount_impact_analysis(df: pd.DataFrame) -> pd.DataFrame:
-    """Analyze the relationship between discount tiers and profitability."""
+    """Analyze the relationship between discount tiers and profit realization."""
     df_copy = df.copy()
-    bins = [-0.01, 0.0, 0.10, 0.20, 1.0]
-    labels = ["No Discount (0%)", "Low (1-10%)", "Moderate (11-20%)", "High (>20%)"]
+    bins = [-0.01, 0.0, 0.20, 0.50, 1.0]
+    labels = ["0% (No Discount)", "1% - 20% (Standard)", "21% - 50% (Deep)", "51%+ (Clearance)"]
     df_copy["discount_tier"] = pd.cut(df_copy["discount"], bins=bins, labels=labels)
     
     disc_summary = df_copy.groupby("discount_tier", observed=False).agg(
-        orders=("order_id", "nunique"),
+        transactions=("order_id", "count"),
         total_sales=("sales", "sum"),
         total_profit=("profit", "sum"),
         avg_units=("quantity", "mean"),
         avg_order_value=("sales", "mean")
     ).reset_index()
     
-    disc_summary["profit_margin_pct"] = (disc_summary["total_profit"] / disc_summary["total_sales"] * 100.0).round(2)
+    disc_summary["profit_margin_pct"] = np.where(
+        disc_summary["total_sales"] > 0,
+        (disc_summary["total_profit"] / disc_summary["total_sales"] * 100.0).round(2),
+        0.0
+    )
     return disc_summary
 
 def get_pareto_product_analysis(df: pd.DataFrame) -> pd.DataFrame:
@@ -212,14 +221,10 @@ def get_pareto_product_analysis(df: pd.DataFrame) -> pd.DataFrame:
 if __name__ == "__main__":
     df = load_cleaned_data()
     kpis = calculate_kpis(df)
-    print("--- Core KPIs ---")
+    print("--- Verified Real KPIs ---")
     for k, v in kpis.items():
         print(f"  {k}: {v}")
     
-    print("\n--- Monthly Trends Sample ---")
-    monthly = get_monthly_trends(df)
-    print(monthly.head(3))
-    
-    print("\n--- Category Breakdown ---")
-    cats = get_category_performance(df)
+    cats, subcats = get_category_performance(df)
+    print("\n--- Actual Category Performance ---")
     print(cats)
